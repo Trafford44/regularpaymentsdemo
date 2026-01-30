@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Regular Payment Audit - Demo</title>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --accent: #3498db;
+            --success: #27ae60;
+            --bg: #f8f9fa;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); margin: 0; display: flex; justify-content: center; min-height: 100vh; }
+        
+        /* Login Overlay */
+        #login-overlay { position: fixed; inset: 0; background: var(--primary); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; color: white; }
+        #lockout-overlay { 
+            position: fixed; 
+            inset: 0; 
+            background: rgba(15, 23, 42, 0.98); 
+            display: none; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            z-index: 10001; 
+            color: white; 
+            text-align: center; 
+            backdrop-filter: blur(5px);
+        }
+        #sessionTimer { font-size: 0.8rem; color: #666; font-weight: bold; margin-right: 15px; }
+        .login-box { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); color: var(--primary); text-align: center; width: 300px; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { opacity: 0.9; }
+
+        /* Main Dashboard */
+        #dashboard { display: none; width: 95%; max-width: 1200px; margin-top: 2rem; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; background: white; padding: 1rem 2rem; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        
+        .summary-card { background: var(--primary); color: white; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; display: inline-block; }
+
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 15px rgba(0,0,0,0.05); }
+        th { background: #f1f1f1; padding: 15px; text-align: left; font-size: 0.8rem; text-transform: uppercase; color: #666; }
+        td { padding: 15px; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+        tr:hover { background: #fdfdfd; }
+
+        .badge { padding: 4px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; }
+        .status-pending { background: #fff8da; color: #e67e22; }
+        .status-active { background: #e8f5e9; color: #2e7d32; }
+        .status-inactive { background: #eeeeee; color: #555555; }
+        .amount { font-family: 'Courier New', Courier, monospace; font-weight: bold; text-align: right; }
+        
+        /* Initial State */
+        #login-overlay, #dashboard {display: none;}
+
+        /* Table & Accordion logic */
+        .data-row { cursor: pointer; transition: background 0.15s ease; }
+        .data-row:hover { background: #f8fafc; }
+        .data-row.active { background: #eff6ff; }
+
+        .detail-row { display: none; background: #f8fafc; }
+        .detail-row.show { display: table-row; }
+
+        .detail-content {
+            padding: 1.5rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .detail-box h4 { margin: 0 0 0.5rem 0; font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }
+        .detail-box p { margin: 0; font-size: 0.9rem; font-weight: 500; }
+
+
+    </style>
+</head>
+<body>
+    <div id="lockout-overlay">
+        <div style="font-size: 4rem; margin-bottom: 1rem;">🔒</div>
+        <h2>Session Expired</h2>
+        <p style="color: #94a3b8; margin-bottom: 25px;">For your security, your session has timed out.</p>
+        <button onclick="logout()" style="width: auto; padding: 10px 30px;">Login Again</button>
+    </div>
+    
+    <div id="login-overlay">
+        <div class="login-box">
+            <h2>Payment Audit Login</h2>
+            <p>Enter password</p>
+            <form onsubmit="handleLogin(); return false;">
+                <input type="password" id="passInput" placeholder="Password" required autofocus>
+                <button type="submit" id="loginBtn">Unlock Dashboard</button>
+            </form>
+            <p id="errMsg" style="color: red; display: none; margin-top: 10px;">Access Denied</p>
+        </div>
+    </div>
+
+    <div id="dashboard">
+        <header>
+            <h1>Regular Payment Audit - Demo</h1>
+            <div style="display: flex; align-items: center;">
+                <span id="sessionTimer"></span>
+                <button onclick="logout()" style="width: auto; background: #95a5a6;">Logout</button>
+            </div>
+        </header>
+
+        <div class="summary-card">
+            <small>Estimated Annual Outgoings</small>
+            <h2 id="totalDisplay">$0.00</h2>
+        </div>
+        
+        <p id="lastUpdated" style="font-size: 0.8rem; color: #666; margin-top: -1.5rem; margin-bottom: 2rem;">
+            Waiting for sync...
+        </p>
+
+        <table id="financeTable">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th>Service</th>
+                    <th>Provider</th>
+                    <th>Amount</th>
+                    <th>Frequency</th>
+                    <th>Status</th>
+                    <th style="text-align: right;">Annual Total</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 40px; color: #666;">
+                        Synchronising data...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const G_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxZsn-oEn1jRVO8VcyBc8KbSR52lFZqnxSgtwmATht1vFl-WqC1Mzd3dhnJh58_qw1njg/exec"; 
+        // const SESSION_DURATION_MS = 30 * 60 * 1000; // 30 minutes of inactivity allowed
+        const SESSION_DURATION_MS = 300000; // 5 mins of inactivity allowed
+
+        async function hashPassword(str) {
+            const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+            return Array.prototype.map.call(new Uint8Array(buf), x => (('00' + x.toString(16)).slice(-2))).join('');
+        }
+
+        const SessionManager = {
+            timerInterval: null,
+            expiryTime: null,
+            isActive: false,
+
+            start() {
+                this.isActive = true;
+                this.reset();
+                this.run();
+                this.setupActivityListeners();
+            },
+
+            reset() {
+                if (!this.isActive) return;
+                // Extend session duration from current moment
+                this.expiryTime = Date.now() + SESSION_DURATION_MS;
+                localStorage.setItem("vault_expiry", this.expiryTime);
+                
+                // If the lockout was showing, hide it (in case they returned to page)
+                const lockout = document.getElementById('lockout-overlay');
+                if (lockout) lockout.style.display = 'none';
+            },
+
+            run() {
+                if (this.timerInterval) clearInterval(this.timerInterval);
+                this.timerInterval = setInterval(() => {
+                    const timeLeft = this.expiryTime - Date.now();
+                    
+                    if (timeLeft <= 0) {
+                        this.stop();
+                        document.getElementById('lockout-overlay').style.display = 'flex';
+                    } else {
+                        const mins = Math.floor(timeLeft / 60000);
+                        const secs = Math.floor((timeLeft % 60000) / 1000);
+                        const timerEl = document.getElementById('sessionTimer');
+                        if (timerEl) timerEl.innerText = `Idle Lock: ${mins}m ${secs}s`;
+                    }
+                }, 1000);
+            },
+
+            setupActivityListeners() {
+                // Monitor for any interaction to reset the idle timer
+                ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'].forEach(name => {
+                    window.addEventListener(name, () => this.reset(), { passive: true });
+                });
+            },
+
+            stop() {
+                this.isActive = false;
+                clearInterval(this.timerInterval);
+            }
+        };
+
+        async function handleLogin() {
+            const passInput = document.getElementById('passInput');
+            const loginBtn = document.getElementById('loginBtn');
+            const errEl = document.getElementById('errMsg');
+            const pass = passInput.value;
+            
+            errEl.style.display = "none";
+            loginBtn.disabled = true;
+            loginBtn.innerText = "Verifying...";
+            loginBtn.style.opacity = "0.7";
+
+            const hash = await hashPassword(pass);
+            
+            try {
+                const response = await fetch(G_SCRIPT_URL, {
+                    method: "POST",
+                    mode: "cors",
+                    body: JSON.stringify({ action: "login", hash: hash })
+                });
+                const result = await response.json();
+
+                if (result.status === "SUCCESS") {
+                    localStorage.setItem("vault_token", result.payload.token);
+                    SessionManager.start();
+                    loadDashboard();
+                } else {
+                    loginBtn.disabled = false;
+                    loginBtn.innerText = "Unlock Dashboard";
+                    loginBtn.style.opacity = "1";
+                    errEl.style.display = "block";
+                    errEl.innerText = result.payload || "Access Denied";
+                    passInput.value = "";
+                    passInput.focus();
+                }
+            } catch (e) {
+                console.error(e);
+                loginBtn.disabled = false;
+                loginBtn.innerText = "Unlock Dashboard";
+                loginBtn.style.opacity = "1";
+                errEl.style.display = "block";
+                errEl.innerText = "Connection Error.";
+            }
+        }
+
+        async function loadDashboard() {
+            const token = localStorage.getItem("vault_token");
+            if (!token) return;
+
+            try {
+                const response = await fetch(G_SCRIPT_URL, {
+                    method: "POST",
+                    body: JSON.stringify({ action: "getData", token: token })
+                });
+                const result = await response.json();
+
+                if (result.status === "SUCCESS") {
+                    const now = new Date();
+                    document.getElementById('lastUpdated').innerText = `Last Synced: ${now.toLocaleDateString()} at ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+                    renderTable(result.payload.data);
+                    document.getElementById('login-overlay').style.display = "none";
+                    document.getElementById('dashboard').style.display = "block";
+                } else {
+                    logout();
+                }
+            } catch (e) {
+                console.error("Data load failed", e);
+                document.getElementById('tableBody').innerHTML = `
+                    <tr>
+                        <td colspan="7" style="text-align: center; color: red; padding: 20px;">
+                            Connection Error. Please refresh the page.
+                        </td>
+                    </tr>`;
+            }
+        }
+
+        function renderTable(data) {
+            const body = document.getElementById('tableBody');
+            let total = 0;
+            body.innerHTML = "";
+
+            // Assuming data[0] is header, start loop at 1
+            for (let i = 1; i < data.length; i++) {
+                const row = data[i];
+                if (!row[0]) continue; 
+
+                // Calculation and Data Mapping
+                const annual = parseFloat(row[9]) || 0; 
+                total += annual;
+                
+                // Clean status for CSS class
+                const statusText = row[7] || "";
+                const statusClass = statusText.toString().toLowerCase().trim().replace(/\s+/g, '-');
+                
+                // Format Currency values
+                const formattedCost = row[4] ? parseFloat(row[4]).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "0.00";
+                const formattedAnnual = annual.toLocaleString(undefined, {minimumFractionDigits: 2});
+
+                // 1. Create the Visible Main Row
+                const tr = document.createElement('tr');
+                tr.className = 'data-row';
+                tr.id = `row-${i}`;
+                // Attach the toggle function (ensure toggleRow is defined in your script)
+                tr.onclick = () => toggleRow(i); 
+                
+                tr.innerHTML = `
+                    <td><strong>${row[0]}</strong></td>
+                    <td>${row[1] || ""}</td>
+                    <td>${row[2] || ""}</td>          
+                    <td style="text-align: right;">${formattedCost}</td>
+                    <td>${row[5] || ""}</td>
+                    <td><span class="badge status-${statusClass}">${statusText}</span></td>
+                    <td class="amount">$${formattedAnnual}</td>
+                `;
+
+                // 2. Create the Hidden Detail Row (Accordion Content)
+                const detailTr = document.createElement('tr');
+                detailTr.className = 'detail-row';
+                detailTr.id = `detail-${i}`;
+                detailTr.innerHTML = `
+                    <td colspan="7">
+                        <div class="detail-content">
+                            <div class="detail-box">
+                                <h4>Payment Type</h4>
+                                <p>${row[6] || ''}</p>
+                            </div>
+                            <div class="detail-box">
+                                <h4>Last Reviewed</h4>
+                                <p>${row[8] || 'N/A'}</p>
+                            </div>
+                            <div class="detail-box">
+                                <h4>Reminder Due</h4>
+                                <p style="font-weight: 400; font-size: 0.85rem; color: #4b5563;">
+                                    ${row[11] || ''}
+                                </p>
+                            </div>
+                            <div class="detail-box">
+                                <h4>Notes</h4>
+                                <p style="font-weight: 400; font-size: 0.85rem; color: #4b5563;">
+                                    ${row[14] || ''}
+                                </p>
+                            </div>
+                        </div>
+                    </td>
+                `;
+
+                // Append both to the table body
+                body.appendChild(tr);
+                body.appendChild(detailTr);
+            }
+            
+            // Update the footer total
+            const totalDisplay = document.getElementById('totalDisplay');
+            if (totalDisplay) {
+                totalDisplay.innerText = `$${total.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            }
+        }
+
+
+        function toggleRow(idx) {
+            const detailRow = document.getElementById(`detail-${idx}`);
+            const mainRow = document.getElementById(`row-${idx}`);
+            const isShowing = detailRow.classList.contains('show');
+
+            // Close any currently open rows
+            document.querySelectorAll('.detail-row').forEach(r => r.classList.remove('show'));
+            document.querySelectorAll('.data-row').forEach(r => r.classList.remove('active'));
+
+            // If it wasn't already open, open it
+            if (!isShowing) {
+                detailRow.classList.add('show');
+                mainRow.classList.add('active');
+            }
+        }
+
+        function logout() {
+            SessionManager.stop();
+            localStorage.clear();
+            location.reload();
+        }
+
+        (function init() {
+            const token = localStorage.getItem("vault_token");
+            const expiry = localStorage.getItem("vault_expiry");
+            
+            // Re-auth if session is still valid
+            if (token && expiry && parseInt(expiry) > Date.now()) {
+                SessionManager.start();
+                loadDashboard();
+            } else {
+                localStorage.clear();
+                document.getElementById('login-overlay').style.display = "flex";
+                document.getElementById('dashboard').style.display = "none";
+            }
+        })();
+    </script>
+</body>
+</html>
